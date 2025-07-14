@@ -1,0 +1,327 @@
+Parameters:
+
+  Version:
+    Description: Version identifier for the deployment
+    Type: String
+
+  CognitoDomain:
+    Description: Domain name used for the Cognito user pool
+    Type: String
+    Default: hello-world-example
+
+Outputs:
+  ApiEndpoint:
+    Value: !Sub https://${MyApi}.execute-api.${AWS::Region}.amazonaws.com/v1
+
+  CognitoEndpoint:
+    Value: !Sub https://${CognitoDomain}.auth.${AWS::Region}.amazoncognito.com
+
+  ClientId:
+    Value: !GetAtt MyClient.ClientId
+
+Resources:
+
+  MyCognito:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: MyPool
+
+  UserPoolDomain: 
+    Type: AWS::Cognito::UserPoolDomain 
+    Properties:
+      UserPoolId: !Ref MyCognito 
+      Domain: !Ref CognitoDomain
+
+  MyResourceServer:
+    Type: AWS::Cognito::UserPoolResourceServer
+    Properties:
+      Identifier: https://example.com
+      Name: Hello World
+      Scopes:
+        - ScopeDescription: Read Access
+          ScopeName: read
+        - ScopeDescription: Write Access
+          ScopeName: write
+      UserPoolId: !Ref MyCognito
+
+  ApiDocumentationVersion:
+    Type: AWS::ApiGateway::DocumentationVersion
+    DependsOn:
+      - MyApiDocumentation
+      - MyResourceDocumentation
+      - MyModelDocumentation
+    Properties:
+      Description: My API
+      DocumentationVersion: !Ref Version
+      RestApiId: !Ref MyApi
+
+  MyApiDocumentation:
+    Type: AWS::ApiGateway::DocumentationPart
+    Properties:
+      RestApiId: !Ref MyApi
+      Location:
+        Type: API
+      Properties: !Sub >-
+        {
+          "info": {
+            "title":"MyApi",
+            "version":"${Version}",
+            "description":"Example API that uses read/write scopes"
+          },
+          "tags": [
+            {
+              "name":"hello",
+              "description":"Hello world"
+            }
+          ]
+        }
+
+  MyApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: MyApi
+      EndpointConfiguration:
+        Types: [REGIONAL]
+      
+  ApiStage:
+    Type: AWS::ApiGateway::Stage
+    DependsOn:
+      - ApiDocumentationVersion
+    Properties:
+      DeploymentId: !Ref MyDeployment
+      DocumentationVersion: !Ref Version
+      MethodSettings:
+        - DataTraceEnabled: true
+          HttpMethod: '*'
+          LoggingLevel: INFO
+          MetricsEnabled: true
+          ResourcePath: /*
+      RestApiId: !Ref MyApi
+      StageName: v1
+      TracingEnabled: true
+
+  MyDeployment:
+    Type: AWS::ApiGateway::Deployment
+    Properties:
+      RestApiId: !Ref MyApi
+    DependsOn:
+      - ApiDocumentationVersion
+      - MyRootMethod
+      - MyMethod
+      - MyMethodWrite
+
+  MyAuthorizer:
+    Type: AWS::ApiGateway::Authorizer
+    Properties:
+      Name: MyAuthorizer
+      RestApiId: !Ref MyApi
+      ProviderARNs: [!GetAtt MyCognito.Arn]
+      Type: COGNITO_USER_POOLS
+      IdentitySource: method.request.header.Authorization
+
+  MyResourceDocumentation:
+    Type: AWS::ApiGateway::DocumentationPart
+    Properties:
+      RestApiId: !Ref MyApi
+      Location:
+        Path: /hello
+        Type: RESOURCE
+      Properties: >-
+        {
+          "summary": "Hello World",
+          "description": "Simple hello world endpoint"
+        }
+
+  MyResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref MyApi
+      ParentId: !GetAtt MyApi.RootResourceId
+      PathPart: hello
+
+  MyModelDocumentation:
+    Type: AWS::ApiGateway::DocumentationPart
+    Properties:
+      RestApiId: !Ref MyApi
+      Location:
+        Name: HelloModel
+        Type: MODEL
+      Properties: >-
+        {
+          "title":"Hello",
+          "description":"Response model for the hello endpoint",
+          "schema": {
+            "properties": {
+              "message": {
+                "description": "A message for the caller"
+              },
+              "timestamp": {
+                "description": "The timestamp of the context of the API call"
+              },
+              "requestId": {
+                "description": "The requestId of the context of the API call"
+              }
+            }
+          }
+        }
+
+  MyRootModel:
+    Type: AWS::ApiGateway::Model
+    Properties:
+      ContentType: application/json
+      Description: The MyRootModel is an example model
+      Name: RootModel
+      RestApiId: !Ref MyApi
+      Schema:
+        type: object
+        properties:
+          message:
+            type: string
+            description: A message for the caller
+
+  MyRootMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      OperationName: MyMethod
+      RestApiId: !Ref MyApi
+      ResourceId: !GetAtt MyApi.RootResourceId
+      AuthorizerId: !Ref MyAuthorizer
+      AuthorizationType: COGNITO_USER_POOLS
+      HttpMethod: GET
+      AuthorizationScopes:
+        - https://example.com/read
+      Integration:
+        Type: MOCK
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseTemplates:
+              application/json: |
+                {
+                  "message": "Hello Api!"
+                }
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: !Ref MyRootModel
+
+  MyWriteModel:
+    Type: AWS::ApiGateway::Model
+    Properties:
+      ContentType: application/json
+      Description: The MyWriteModel is an example model
+      Name: MyWriteModel
+      RestApiId: !Ref MyApi
+      Schema:
+        type: object
+        properties:
+          message:
+            type: string
+            description: A message from the caller
+
+  MyModel:
+    Type: AWS::ApiGateway::Model
+    Properties:
+      ContentType: application/json
+      Description: The MyModel is an example model
+      Name: MyModel
+      RestApiId: !Ref MyApi
+      Schema:
+        type: object
+        properties:
+          message:
+            type: string
+            description: A message for the caller
+          timestamp:
+            type: string
+            description: The timestamp of the context of the API call
+          requestId:
+            type: string
+            description: The requestId of the context of the API call
+
+  MyMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      OperationName: MyMethod
+      RestApiId: !Ref MyApi
+      ResourceId: !Ref MyResource
+      AuthorizerId: !Ref MyAuthorizer
+      AuthorizationType: COGNITO_USER_POOLS
+      HttpMethod: GET
+      AuthorizationScopes:
+        - https://example.com/read
+      Integration:
+        Type: MOCK
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseTemplates:
+              application/json: |
+                {
+                  "message": "Hello World!",
+                  "timestamp": "$context.requestTime",
+                  "requestId": "$context.requestId"
+                }
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: !Ref MyModel
+
+  MyMethodWrite:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      OperationName: MyMethod
+      RestApiId: !Ref MyApi
+      ResourceId: !Ref MyResource
+      AuthorizerId: !Ref MyAuthorizer
+      AuthorizationType: COGNITO_USER_POOLS
+      HttpMethod: POST
+      RequestValidatorId: !Ref RequestValidator
+      AuthorizationScopes:
+        - https://example.com/write
+      Integration:
+        Type: MOCK
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseTemplates:
+              application/json: |
+                {
+                  "message": "Received the request",
+                  "timestamp": "$context.requestTime",
+                  "requestId": "$context.requestId"
+                }
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      RequestModels:
+        application/json: !Ref MyWriteModel
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: !Ref MyModel
+
+  RequestValidator:
+    Type: AWS::ApiGateway::RequestValidator
+    Properties:
+      Name: RequestValidator
+      RestApiId: !Ref MyApi
+      ValidateRequestBody: true
+      ValidateRequestParameters: true
+
+  MyClient:
+    Type: AWS::Cognito::UserPoolClient
+    DependsOn: [MyResourceServer]
+    Properties:
+      AllowedOAuthFlows:
+        - client_credentials
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthScopes:
+        - https://example.com/read
+        - https://example.com/write
+      ClientName: MyClient
+      EnableTokenRevocation: false
+      ExplicitAuthFlows:
+        - ALLOW_REFRESH_TOKEN_AUTH
+      GenerateSecret: true
+      UserPoolId: !Ref MyCognito
