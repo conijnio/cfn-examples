@@ -4,12 +4,18 @@ Parameters:
     Description: Version identifier for the deployment
     Type: String
 
+  ResourceServerIdentifier:
+    Description: The identifier used for the resource server
+    Type: String
+
   CognitoDomain:
     Description: Domain name used for the Cognito user pool
     Type: String
-    Default: hello-world-example
 
 Outputs:
+  ApiId:
+    Value: !Ref MyApi
+
   ApiEndpoint:
     Value: !Sub https://${MyApi}.execute-api.${AWS::Region}.amazonaws.com/v1
 
@@ -20,6 +26,13 @@ Outputs:
     Value: !GetAtt MyClient.ClientId
 
 Resources:
+
+#      ___      __    __  .___________. __    __
+#     /   \    |  |  |  | |           ||  |  |  |
+#    /  ^  \   |  |  |  | `---|  |----`|  |__|  |
+#   /  /_\  \  |  |  |  |     |  |     |   __   |
+#  /  _____  \ |  `--'  |     |  |     |  |  |  |
+# /__/     \__\ \______/      |__|     |__|  |__|
 
   MyCognito:
     Type: AWS::Cognito::UserPool
@@ -32,11 +45,28 @@ Resources:
       UserPoolId: !Ref MyCognito 
       Domain: !Ref CognitoDomain
 
-  MyResourceServer:
+  MyClient:
+    Type: AWS::Cognito::UserPoolClient
+    DependsOn: [ProductsResourceServer]
+    Properties:
+      AllowedOAuthFlows:
+        - client_credentials
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthScopes:
+        - !Sub ${ResourceServerIdentifier}/read
+        - !Sub ${ResourceServerIdentifier}/write
+      ClientName: MyClient
+      EnableTokenRevocation: false
+      ExplicitAuthFlows:
+        - ALLOW_REFRESH_TOKEN_AUTH
+      GenerateSecret: true
+      UserPoolId: !Ref MyCognito
+
+  ProductsResourceServer:
     Type: AWS::Cognito::UserPoolResourceServer
     Properties:
-      Identifier: https://example.com
-      Name: Hello World
+      Identifier: !Ref ResourceServerIdentifier
+      Name: Product Server
       Scopes:
         - ScopeDescription: Read Access
           ScopeName: read
@@ -44,17 +74,19 @@ Resources:
           ScopeName: write
       UserPoolId: !Ref MyCognito
 
-  ApiDocumentationVersion:
-    Type: AWS::ApiGateway::DocumentationVersion
-    DependsOn:
-      - MyApiDocumentation
-      - MyResourceDocumentation
-      - MyModelDocumentation
-    Properties:
-      Description: My API
-      DocumentationVersion: !Ref Version
-      RestApiId: !Ref MyApi
+#       ___      .______    __
+#      /   \     |   _  \  |  |
+#     /  ^  \    |  |_)  | |  |
+#    /  /_\  \   |   ___/  |  |
+#   /  _____  \  |  |      |  |
+#  /__/     \__\ | _|      |__|
 
+  MyApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: MyApi
+      EndpointConfiguration:
+        Types: [REGIONAL]
   MyApiDocumentation:
     Type: AWS::ApiGateway::DocumentationPart
     Properties:
@@ -66,23 +98,49 @@ Resources:
           "info": {
             "title":"MyApi",
             "version":"${Version}",
-            "description":"Example API that uses read/write scopes"
+            "description":"Example API that uses read/write scopes (Doc)"
           },
           "tags": [
             {
-              "name":"hello",
-              "description":"Hello world"
+              "name":"products",
+              "description":"List products that are available (Doc)"
             }
           ]
         }
 
-  MyApi:
-    Type: AWS::ApiGateway::RestApi
+  MyAuthorizer:
+    Type: AWS::ApiGateway::Authorizer
     Properties:
-      Name: MyApi
-      EndpointConfiguration:
-        Types: [REGIONAL]
-      
+      Name: MyAuthorizer
+      RestApiId: !Ref MyApi
+      ProviderARNs: [ !GetAtt MyCognito.Arn ]
+      Type: COGNITO_USER_POOLS
+      IdentitySource: method.request.header.Authorization
+
+  ApiDocumentationVersion:
+    Type: AWS::ApiGateway::DocumentationVersion
+    DependsOn:
+      - MyApiDocumentation
+      - ApiInfoModelDocumentation
+      - ProductModelDocumentation
+      - ListProductsModelDocumentation
+      - MyRootMethodGetMethodDocumentation
+      - ProductsResourceDocumentation
+      - ProductsGetMethodDocumentation
+      - ProductsPostMethodDocumentation
+    Properties:
+      Description: My API
+      DocumentationVersion: !Ref Version
+      RestApiId: !Ref MyApi
+
+  RequestValidator:
+    Type: AWS::ApiGateway::RequestValidator
+    Properties:
+      Name: RequestValidator
+      RestApiId: !Ref MyApi
+      ValidateRequestBody: true
+      ValidateRequestParameters: true
+
   ApiStage:
     Type: AWS::ApiGateway::Stage
     DependsOn:
@@ -107,150 +165,239 @@ Resources:
     DependsOn:
       - ApiDocumentationVersion
       - MyRootMethod
-      - MyMethod
-      - MyMethodWrite
+      - ProductsGetMethod
+      - ProductsPostMethod
 
-  MyAuthorizer:
-    Type: AWS::ApiGateway::Authorizer
+# .___  ___.   ______    _______   _______  __          _______.
+# |   \/   |  /  __  \  |       \ |   ____||  |        /       |
+# |  \  /  | |  |  |  | |  .--.  ||  |__   |  |       |   (----`
+# |  |\/|  | |  |  |  | |  |  |  ||   __|  |  |        \   \
+# |  |  |  | |  `--'  | |  '--'  ||  |____ |  `----.----)   |
+# |__|  |__|  \______/  |_______/ |_______||_______|_______/
+
+  ApiInfoModel:
+    Type: AWS::ApiGateway::Model
     Properties:
-      Name: MyAuthorizer
+      ContentType: application/json
+      Description: The ApiInfoModel is an example model (Model)
+      Name: ApiInfo
       RestApiId: !Ref MyApi
-      ProviderARNs: [!GetAtt MyCognito.Arn]
-      Type: COGNITO_USER_POOLS
-      IdentitySource: method.request.header.Authorization
-
-  MyResourceDocumentation:
+      Schema:
+        type: object
+        properties:
+          name:
+            type: string
+            description: The name of the API (Model)
+          version:
+            type: string
+            description: The version of the API (Model)
+  ApiInfoModelDocumentation:
     Type: AWS::ApiGateway::DocumentationPart
     Properties:
       RestApiId: !Ref MyApi
       Location:
-        Path: /hello
-        Type: RESOURCE
-      Properties: >-
-        {
-          "summary": "Hello World",
-          "description": "Simple hello world endpoint"
-        }
-
-  MyResource:
-    Type: AWS::ApiGateway::Resource
-    Properties:
-      RestApiId: !Ref MyApi
-      ParentId: !GetAtt MyApi.RootResourceId
-      PathPart: hello
-
-  MyModelDocumentation:
-    Type: AWS::ApiGateway::DocumentationPart
-    Properties:
-      RestApiId: !Ref MyApi
-      Location:
-        Name: HelloModel
+        Name: ApiInfo
         Type: MODEL
       Properties: >-
         {
-          "title":"Hello",
-          "description":"Response model for the hello endpoint",
+          "title":"ApiInfo",
+          "description":"Response model for the hello endpoint (Doc)",
           "schema": {
             "properties": {
-              "message": {
-                "description": "A message for the caller"
+              "name": {
+                "description": "The name of the API (Doc)"
               },
-              "timestamp": {
-                "description": "The timestamp of the context of the API call"
-              },
-              "requestId": {
-                "description": "The requestId of the context of the API call"
+              "version": {
+                "description": "The version of the API (Doc)"
               }
             }
           }
         }
 
-  MyRootModel:
+  ProductModel:
     Type: AWS::ApiGateway::Model
     Properties:
       ContentType: application/json
-      Description: The MyRootModel is an example model
-      Name: RootModel
+      Description: The MyModel is an example model (Model)
+      Name: Product
       RestApiId: !Ref MyApi
       Schema:
         type: object
         properties:
-          message:
+          name:
             type: string
-            description: A message for the caller
+            description: Name of the product (Model)
+          description:
+            type: string
+            description: Description of the product (Model)
+  ProductModelDocumentation:
+    Type: AWS::ApiGateway::DocumentationPart
+    Properties:
+      RestApiId: !Ref MyApi
+      Location:
+        Name: Product
+        Type: MODEL
+      Properties: >-
+        {
+          "title":"Product",
+          "description":"Response model for the hello endpoint (Doc)",
+          "schema": {
+            "properties": {
+              "name": {
+                "description": "The name of the product (Doc)"
+              },
+              "description": {
+                "description": "The description of the product (Doc)"
+              }
+            }
+          }
+        }
+
+  ListProductsModel:
+    Type: AWS::ApiGateway::Model
+    Properties:
+      ContentType: application/json
+      Description: The MyModel is an example model (Model)
+      Name: ListProducts
+      RestApiId: !Ref MyApi
+      Schema:
+        type: object
+        properties:
+          timestamp:
+            type: string
+            description: The timestamp of the context of the API call (Model)
+          requestId:
+            type: string
+            description: The requestId of the context of the API call (Model)
+          products:
+            type: array
+            description: List of available products (Model)
+            items:
+              $ref: !Sub "https://apigateway.amazonaws.com/restapis/${MyApi.RestApiId}/models/${ProductModel}"
+
+  ListProductsModelDocumentation:
+    Type: AWS::ApiGateway::DocumentationPart
+    Properties:
+      RestApiId: !Ref MyApi
+      Location:
+        Name: ListProducts
+        Type: MODEL
+      Properties: >-
+        {
+          "title":"ListProducts",
+          "description":"Response model for the hello endpoint (Doc)",
+          "schema": {
+            "properties": {
+              "timestamp": {
+                "description": "The timestamp of the context of the API call (Doc)"
+              },
+              "requestId": {
+                "description": "The requestId of the context of the API call (Doc)"
+              },
+              "products": {
+                "description": "List of available products (Doc)"
+              }
+            }
+          }
+        }
+
+  # .______        ______     ______   .___________.
+  # |   _  \      /  __  \   /  __  \  |           |
+  # |  |_)  |    |  |  |  | |  |  |  | `---|  |----`
+  # |      /     |  |  |  | |  |  |  |     |  |
+  # |  |\  \----.|  `--'  | |  `--'  |     |  |
+  # | _| `._____| \______/   \______/      |__|
 
   MyRootMethod:
     Type: AWS::ApiGateway::Method
     Properties:
-      OperationName: MyMethod
+      OperationName: info
       RestApiId: !Ref MyApi
       ResourceId: !GetAtt MyApi.RootResourceId
       AuthorizerId: !Ref MyAuthorizer
       AuthorizationType: COGNITO_USER_POOLS
       HttpMethod: GET
       AuthorizationScopes:
-        - https://example.com/read
+        - !Sub ${ResourceServerIdentifier}/read
       Integration:
         Type: MOCK
         IntegrationResponses:
           - StatusCode: 200
             ResponseTemplates:
-              application/json: |
+              application/json: !Sub |
                 {
-                  "message": "Hello Api!"
+                  "name": "MyApi",
+                  "version": "${Version}",
                 }
         RequestTemplates:
           application/json: '{"statusCode": 200}'
       MethodResponses:
         - StatusCode: 200
           ResponseModels:
-            application/json: !Ref MyRootModel
-
-  MyWriteModel:
-    Type: AWS::ApiGateway::Model
+            application/json: !Ref ApiInfoModel
+  MyRootMethodGetMethodDocumentation:
+    Type: AWS::ApiGateway::DocumentationPart
     Properties:
-      ContentType: application/json
-      Description: The MyWriteModel is an example model
-      Name: MyWriteModel
       RestApiId: !Ref MyApi
-      Schema:
-        type: object
-        properties:
-          message:
-            type: string
-            description: A message from the caller
+      Location:
+        Type: METHOD
+        Path: /
+        Method: GET
+      Properties: >-
+        {
+          "tags": [],
+          "summary": "API endpoint (Doc)",
+          "description": "Returns info about the API (Doc)",
+          "operationId": "info",
+          "responses": {
+            "200": {
+              "description": "Successful operation (Doc)",
+              "content": {
+                "application/json": {
+                  "schema": { "$ref": "#/components/schemas/ApiInfoModel" }
+                }
+              }
+            }
+          }
+        }
 
-  MyModel:
-    Type: AWS::ApiGateway::Model
+# .______   .______        ______    _______   __    __    ______ .___________.    _______.
+# |   _  \  |   _  \      /  __  \  |       \ |  |  |  |  /      ||           |   /       |
+# |  |_)  | |  |_)  |    |  |  |  | |  .--.  ||  |  |  | |  ,----'`---|  |----`  |   (----`
+# |   ___/  |      /     |  |  |  | |  |  |  ||  |  |  | |  |         |  |        \   \
+# |  |      |  |\  \----.|  `--'  | |  '--'  ||  `--'  | |  `----.    |  |    .----)   |
+# | _|      | _| `._____| \______/  |_______/  \______/   \______|    |__|    |_______/
+
+  ProductsResource:
+    Type: AWS::ApiGateway::Resource
     Properties:
-      ContentType: application/json
-      Description: The MyModel is an example model
-      Name: MyModel
       RestApiId: !Ref MyApi
-      Schema:
-        type: object
-        properties:
-          message:
-            type: string
-            description: A message for the caller
-          timestamp:
-            type: string
-            description: The timestamp of the context of the API call
-          requestId:
-            type: string
-            description: The requestId of the context of the API call
+      ParentId: !GetAtt MyApi.RootResourceId
+      PathPart: products
+  ProductsResourceDocumentation:
+    Type: AWS::ApiGateway::DocumentationPart
+    Properties:
+      RestApiId: !Ref MyApi
+      Location:
+        Path: /products
+        Type: RESOURCE
+      Properties: >-
+        {
+          "summary": "Products endpoint (Doc)",
+          "description": "Endpoint to retrieve and/or store information about products (Doc)"
+        }
 
-  MyMethod:
+  ProductsGetMethod:
     Type: AWS::ApiGateway::Method
     Properties:
-      OperationName: MyMethod
+      OperationName: listProducts
       RestApiId: !Ref MyApi
-      ResourceId: !Ref MyResource
+      ResourceId: !Ref ProductsResource
       AuthorizerId: !Ref MyAuthorizer
       AuthorizationType: COGNITO_USER_POOLS
       HttpMethod: GET
       AuthorizationScopes:
-        - https://example.com/read
+        - !Sub ${ResourceServerIdentifier}/read
       Integration:
         Type: MOCK
         IntegrationResponses:
@@ -258,29 +405,57 @@ Resources:
             ResponseTemplates:
               application/json: |
                 {
-                  "message": "Hello World!",
                   "timestamp": "$context.requestTime",
-                  "requestId": "$context.requestId"
+                  "requestId": "$context.requestId",
+                  "products": [
+                    {"name": "Product 1", "description": "My first product"},
+                    {"name": "Product 2", "description": "My second product"},
+                  ],
                 }
         RequestTemplates:
           application/json: '{"statusCode": 200}'
       MethodResponses:
         - StatusCode: 200
           ResponseModels:
-            application/json: !Ref MyModel
+            application/json: !Ref ListProductsModel
+  ProductsGetMethodDocumentation:
+    Type: AWS::ApiGateway::DocumentationPart
+    Properties:
+      RestApiId: !Ref MyApi
+      Location:
+        Type: METHOD
+        Path: /products
+        Method: GET
+      Properties: >-
+        {
+          "tags": ["products"],
+          "summary": "List products (Doc)",
+          "description": "Returns a list of products (Doc)",
+          "operationId": "listProducts",
+          "responses": {
+            "200": {
+              "description": "Successful operation (Doc)",
+              "content": {
+                "application/json": {
+                  "schema": { "$ref": "#/components/schemas/ListProducts" }
+                }
+              }
+            }
+          }
+        }
 
-  MyMethodWrite:
+  ProductsPostMethod:
     Type: AWS::ApiGateway::Method
     Properties:
-      OperationName: MyMethod
+      OperationName: createProducts
       RestApiId: !Ref MyApi
-      ResourceId: !Ref MyResource
+      ResourceId: !Ref ProductsResource
       AuthorizerId: !Ref MyAuthorizer
       AuthorizationType: COGNITO_USER_POOLS
       HttpMethod: POST
       RequestValidatorId: !Ref RequestValidator
       AuthorizationScopes:
-        - https://example.com/write
+        - !Sub ${ResourceServerIdentifier}/write
       Integration:
         Type: MOCK
         IntegrationResponses:
@@ -288,40 +463,39 @@ Resources:
             ResponseTemplates:
               application/json: |
                 {
-                  "message": "Received the request",
-                  "timestamp": "$context.requestTime",
-                  "requestId": "$context.requestId"
+                  "name": "Name of the product",
+                  "description": "description of the product"
                 }
         RequestTemplates:
           application/json: '{"statusCode": 200}'
       RequestModels:
-        application/json: !Ref MyWriteModel
+        application/json: !Ref ProductModel
       MethodResponses:
         - StatusCode: 200
           ResponseModels:
-            application/json: !Ref MyModel
-
-  RequestValidator:
-    Type: AWS::ApiGateway::RequestValidator
+            application/json: !Ref ProductModel
+  ProductsPostMethodDocumentation:
+    Type: AWS::ApiGateway::DocumentationPart
     Properties:
-      Name: RequestValidator
       RestApiId: !Ref MyApi
-      ValidateRequestBody: true
-      ValidateRequestParameters: true
-
-  MyClient:
-    Type: AWS::Cognito::UserPoolClient
-    DependsOn: [MyResourceServer]
-    Properties:
-      AllowedOAuthFlows:
-        - client_credentials
-      AllowedOAuthFlowsUserPoolClient: true
-      AllowedOAuthScopes:
-        - https://example.com/read
-        - https://example.com/write
-      ClientName: MyClient
-      EnableTokenRevocation: false
-      ExplicitAuthFlows:
-        - ALLOW_REFRESH_TOKEN_AUTH
-      GenerateSecret: true
-      UserPoolId: !Ref MyCognito
+      Location:
+        Type: METHOD
+        Path: /products
+        Method: POST
+      Properties: >-
+        {
+          "tags": ["products"],
+          "summary": "Create products (Doc)",
+          "description": "Create a product (Doc)",
+          "operationId": "createProducts",
+          "responses": {
+            "200": {
+              "description": "Successful operation (Doc)",
+              "content": {
+                "application/json": {
+                  "schema": { "$ref": "#/components/schemas/Product" }
+                }
+              }
+            }
+          }
+        }

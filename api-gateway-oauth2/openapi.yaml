@@ -1,0 +1,115 @@
+openapi: "3.0.1"
+info:
+  title: "MyApi"
+  description: "Example API that uses read/write scopes (Doc)"
+  version: "2025-07-15T09:56:46Z"
+servers:
+- url: "https://c9zri9ji7k.execute-api.eu-west-1.amazonaws.com/{basePath}"
+  variables:
+    basePath:
+      default: "v1"
+tags:
+- name: "products"
+  description: "List products that are available (Doc)"
+paths:
+  /:
+    get:
+      tags: []
+      summary: "API endpoint (Doc)"
+      description: "Returns info about the API (Doc)"
+      operationId: "info"
+      responses:
+        "200":
+          description: "200 response"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiInfo"
+      security:
+      - MyAuthorizer:
+        - "https://conijn.io/read"
+  /products:
+    get:
+      tags:
+      - "products"
+      summary: "List products (Doc)"
+      description: "Returns a list of products (Doc)"
+      operationId: "listProducts"
+      responses:
+        "200":
+          description: "200 response"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListProducts"
+      security:
+      - MyAuthorizer:
+        - "https://conijn.io/read"
+    post:
+      tags:
+      - "products"
+      summary: "Create products (Doc)"
+      description: "Create a product (Doc)"
+      operationId: "createProducts"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Product"
+        required: true
+      responses:
+        "200":
+          description: "200 response"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+      security:
+      - MyAuthorizer:
+        - "https://conijn.io/write"
+components:
+  schemas:
+    ListProducts:
+      title: "ListProducts"
+      type: "object"
+      properties:
+        requestId:
+          type: "string"
+          description: "The requestId of the context of the API call (Model)"
+        timestamp:
+          type: "string"
+          description: "The timestamp of the context of the API call (Model)"
+        products:
+          type: "array"
+          description: "List of available products (Model)"
+          items:
+            $ref: "#/components/schemas/Product"
+      description: "Response model for the hello endpoint (Doc)"
+    ApiInfo:
+      title: "ApiInfo"
+      type: "object"
+      properties:
+        name:
+          type: "string"
+          description: "The name of the API (Model)"
+        version:
+          type: "string"
+          description: "The version of the API (Model)"
+      description: "Response model for the hello endpoint (Doc)"
+    Product:
+      title: "Product"
+      type: "object"
+      properties:
+        name:
+          type: "string"
+          description: "Name of the product (Model)"
+        description:
+          type: "string"
+          description: "Description of the product (Model)"
+      description: "Response model for the hello endpoint (Doc)"
+  securitySchemes:
+    MyAuthorizer:
+      type: "apiKey"
+      name: "Authorization"
+      in: "header"
+      x-amazon-apigateway-authtype: "cognito_user_pools"
